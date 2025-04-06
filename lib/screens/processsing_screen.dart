@@ -1,5 +1,9 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:device_info_plus/device_info_plus.dart';
 
 class ProcessingScreen extends StatefulWidget {
   final String name;
@@ -26,44 +30,41 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
   @override
   void initState() {
     super.initState();
-    _sendDataToServer();
+    _uploadImage(File(widget.imagePath));
   }
 
-  Future<void> _sendDataToServer() async {
+  Future<void> _sendDataToServer(String imageUrl) async {
     try {
-      var request = http.MultipartRequest(
-        'POST',
-        Uri.parse('http://192.168.148.83:5000/send-request'), // Use 127.0.0.1 for iOS
+      final url = Uri.parse('https://sos-backend-8whf.onrender.com/send-request');
+      final headers = {
+        'Content-Type': 'application/json',
+      };
+      final deviceId =await  _getDeviceId();
+      final body = {
+        "name": widget.name, // ${widget.name}
+        "mobile": widget.mobile, // ${widget.mobile}
+        "image_url": imageUrl, // ${widget.imagePath}
+        "device_id": deviceId,
+        "request_type": "fire",
+        "longitude": 77.202805,
+        "latitude": 28.558899,
+      };
+      setState(() {
+        _statusMessage = "Sending data...";
+      });
+      final response = await http.post(
+        url,
+        headers: headers,
+        body: jsonEncode(body),
       );
 
-      request.fields['name'] = widget.name;
-      request.fields['mobile'] = widget.mobile;
-
-      if (widget.imagePath.isNotEmpty) {
-        request.files.add(await http.MultipartFile.fromPath(
-          'image',
-          widget.imagePath,
-        ));
-      }
-
-      if (widget.videoPath.isNotEmpty) {
-        request.files.add(await http.MultipartFile.fromPath(
-          'video',
-          widget.videoPath,
-        ));
-      }
-
-      var response = await request.send();
-      var responseBody =await response.stream.bytesToString(); // Convert to text
-      print("Response Status: ${response.statusCode}");
-      print("Response Body: $responseBody");
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200) { // Check for the correct success status code
         setState(() {
           _statusMessage = "✅ Success!";
         });
       } else {
         setState(() {
-          _statusMessage = "❌ Failed. Try again.";
+          _statusMessage = "❌ Failed: ${response.body}";
         });
       }
     } catch (e) {
@@ -76,6 +77,68 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
       });
     }
   }
+  Future<String> _getDeviceId() async {
+  final deviceInfo = DeviceInfoPlugin();
+
+  if (Platform.isAndroid) {
+    final androidInfo = await deviceInfo.androidInfo;
+    return androidInfo.id; // Unique per device
+  } else if (Platform.isIOS) {
+    final iosInfo = await deviceInfo.iosInfo;
+    return iosInfo.identifierForVendor ?? "unknown_ios";
+  }
+  return "unknown_device";
+}
+
+  Future<void> _uploadImage(File imageFile) async {
+  try {
+    final url = Uri.parse('http://192.168.178.83:5000/upload-file');
+    final request = http.MultipartRequest('POST', url);
+
+    request.files.add(await http.MultipartFile.fromPath(
+      'image',
+      imageFile.path,
+    ));
+
+    // Send request and get streamed response
+    final streamedResponse = await request.send();
+
+    // Convert streamed response to regular response
+    final response = await http.Response.fromStream(streamedResponse);
+  print(response);
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body); // Assuming server sends JSON
+      print(data);
+      setState(() {
+        _statusMessage = "✅ Uploaded: ${data['message'] ?? 'Success!'}";
+       // Extract image_url
+        
+        // You can also use: data['image_url'] or any other field if available
+      });
+      final imageUrl = data['imageUrl']; // Extract image_url
+
+       setState(() {
+        _statusMessage = "✅ Image uploaded!";
+      });
+            await _sendDataToServer(imageUrl);
+
+    } else {
+      setState(() {
+        _statusMessage =
+            "❌ Failed: ${response.statusCode} - ${response.reasonPhrase}\n${response.body}";
+      });
+    }
+  } catch (e) {
+    setState(() {
+      _statusMessage = "❌ Error uploading image: $e";
+    });
+  } finally {
+    setState(() {
+      _isLoading = false;
+    });
+  }
+}
+
 
   @override
   Widget build(BuildContext context) {
@@ -104,3 +167,5 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
     );
   }
 }
+
+
