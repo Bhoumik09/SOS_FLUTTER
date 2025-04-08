@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:emergency_app/Provider/location_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:device_info_plus/device_info_plus.dart';
@@ -33,9 +34,9 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
     _uploadImage(File(widget.imagePath));
   }
 
-  Future<void> _sendDataToServer(String imageUrl) async {
+  Future<void> _sendDataToServer(String imageUrl, String imageClass) async {
     try {
-      final url = Uri.parse('https://sos-backend-8whf.onrender.com/send-request');
+      final url = Uri.parse('https://sos-backend-uj48.onrender.com/send-request');
       final headers = {
         'Content-Type': 'application/json',
       };
@@ -46,8 +47,9 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
         "image_url": imageUrl, // ${widget.imagePath}
         "device_id": deviceId,
         "request_type": "fire",
-        "longitude": 77.202805,
-        "latitude": 28.558899,
+        "longitude": LocationProvider().currentPosition?.longitude ?? 76.84978,
+        "latitude": LocationProvider().currentPosition?.latitude ?? 23.07551,
+        "image_classification": imageClass.toLowerCase(), // ${widget.imagePath}
       };
       setState(() {
         _statusMessage = "Sending data...";
@@ -69,7 +71,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
       }
     } catch (e) {
       setState(() {
-        _statusMessage = "❌ Error: $e";
+        _statusMessage = " $e";
       });
     } finally {
       setState(() {
@@ -92,7 +94,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
 
   Future<void> _uploadImage(File imageFile) async {
   try {
-    final url = Uri.parse('http://192.168.178.83:5000/upload-file');
+    final url = Uri.parse('https://sos-backend-uj48.onrender.com/upload-file');
     final request = http.MultipartRequest('POST', url);
 
     request.files.add(await http.MultipartFile.fromPath(
@@ -105,7 +107,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
 
     // Convert streamed response to regular response
     final response = await http.Response.fromStream(streamedResponse);
-  print(response);
+  print(jsonDecode(response.body));
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body); // Assuming server sends JSON
       print(data);
@@ -116,11 +118,13 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
         // You can also use: data['image_url'] or any other field if available
       });
       final imageUrl = data['imageUrl']; // Extract image_url
-
+      final imageClassification = data['predictionClassification']; // Extract image_classification
+      print(imageUrl);
+      print(imageClassification);
        setState(() {
         _statusMessage = "✅ Image uploaded!";
       });
-            await _sendDataToServer(imageUrl);
+            await _sendDataToServer(imageUrl, imageClassification); // Send data to server
 
     } else {
       setState(() {
