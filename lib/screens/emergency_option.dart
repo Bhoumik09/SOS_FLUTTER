@@ -48,7 +48,14 @@ class _EmergencyOptionState extends State<EmergencyOption> {
                 title: 'Medical Emergency',
                 color: Colors.blue,
                 icon: Icons.local_hospital,
-                onPressed: () {},
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const EmergencyForm(type: 'medical'),
+                    ),
+                  );
+                },
               )
             ],
           ),

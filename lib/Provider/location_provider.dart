@@ -42,6 +42,7 @@ class LocationProvider with ChangeNotifier {
       _currentPosition = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(accuracy: LocationAccuracy.best)
       );
+      print('Current Position: $_currentPosition.latitude, $_currentPosition.longitude');
       _locationError = '';
     } catch (e) {
       _locationError = 'Failed to get location: $e';

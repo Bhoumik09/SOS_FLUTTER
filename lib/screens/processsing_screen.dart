@@ -3,16 +3,20 @@ import 'dart:io';
 
 import 'package:emergency_app/Provider/location_provider.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:provider/provider.dart';
 
 class ProcessingScreen extends StatefulWidget {
+  final String type;
   final String name;
   final String mobile;
   final String imagePath;
   final String videoPath;
 
   const ProcessingScreen({
+    required this.type,
     required this.name,
     required this.mobile,
     required this.imagePath,
@@ -26,52 +30,39 @@ class ProcessingScreen extends StatefulWidget {
 
 class _ProcessingScreenState extends State<ProcessingScreen> {
   String _statusMessage = "Processing...";
+  String _appBarTitle = "Processing...";
   bool _isLoading = true;
+  List<String> _steps = [];
+
+  Position? _position;
 
   @override
   void initState() {
     super.initState();
-    _uploadImage(File(widget.imagePath));
+    _startProcessing();
   }
 
-  Future<void> _sendDataToServer(String imageUrl, String imageClass) async {
+  Future<void> _startProcessing() async {
     try {
-      final url = Uri.parse('https://sos-backend-uj48.onrender.com/send-request');
-      final headers = {
-        'Content-Type': 'application/json',
-      };
-      final deviceId =await  _getDeviceId();
-      final body = {
-        "name": widget.name, // ${widget.name}
-        "mobile": widget.mobile, // ${widget.mobile}
-        "image_url": imageUrl, // ${widget.imagePath}
-        "device_id": deviceId,
-        "request_type": "fire",
-        "longitude": LocationProvider().currentPosition?.longitude ?? 76.84978,
-        "latitude": LocationProvider().currentPosition?.latitude ?? 23.07551,
-        "image_classification": imageClass.toLowerCase(), // ${widget.imagePath}
-      };
-      setState(() {
-        _statusMessage = "Sending data...";
-      });
-      final response = await http.post(
-        url,
-        headers: headers,
-        body: jsonEncode(body),
-      );
+      final locationProvider =
+          Provider.of<LocationProvider>(context, listen: false);
 
-      if (response.statusCode == 200) { // Check for the correct success status code
-        setState(() {
-          _statusMessage = "✅ Success!";
-        });
-      } else {
-        setState(() {
-          _statusMessage = "❌ Failed: ${response.body}";
-        });
-      }
-    } catch (e) {
+      await locationProvider.fetchLocation();
+      _position = locationProvider.currentPosition;
+      print(_position);
+      _addStep("Uploading image...");
+      await _uploadImage(File(widget.imagePath));
+
+      // If everything goes fine
       setState(() {
-        _statusMessage = " $e";
+        _appBarTitle = "Request Sent";
+        _statusMessage = "Request is sent";
+      });
+    } catch (e) {
+      _addStep("❌ Error: $e");
+      setState(() {
+        _appBarTitle = "Request Failed";
+        _statusMessage = "Request declined";
       });
     } finally {
       setState(() {
@@ -79,97 +70,176 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
       });
     }
   }
-  Future<String> _getDeviceId() async {
-  final deviceInfo = DeviceInfoPlugin();
 
-  if (Platform.isAndroid) {
-    final androidInfo = await deviceInfo.androidInfo;
-    return androidInfo.id; // Unique per device
-  } else if (Platform.isIOS) {
-    final iosInfo = await deviceInfo.iosInfo;
-    return iosInfo.identifierForVendor ?? "unknown_ios";
+  void _addStep(String step) {
+    setState(() {
+      _steps.add(step);
+      _statusMessage = step;
+    });
   }
-  return "unknown_device";
-}
 
-  Future<void> _uploadImage(File imageFile) async {
-  try {
-    final url = Uri.parse('https://sos-backend-uj48.onrender.com/upload-file');
-    final request = http.MultipartRequest('POST', url);
+  Future<void> _sendDataToServer(String imageUrl ,String imageClass) async {
+    try {
+      _addStep("Sending data to server...");
+      final url = Uri.parse('https://sos-backend-uj48.onrender.com/send-request');
+      final headers = {
+        'Content-Type': 'application/json',
+      };
+      final deviceId = await _getDeviceId();
 
-    request.files.add(await http.MultipartFile.fromPath(
-      'image',
-      imageFile.path,
-    ));
+      final body = {
+        "name": widget.name,
+        "mobile": widget.mobile,
+        "image_url": imageUrl,
+        "device_id": deviceId,
+        "request_type": widget.type,
+        "longitude": _position?.longitude,
+        "latitude": _position?.latitude,
+        "image_classification":imageClass,
+      };
 
-    // Send request and get streamed response
-    final streamedResponse = await request.send();
+      final response = await http.post(
+        url,
+        headers: headers,
+        body: jsonEncode(body),
+      );
 
-    // Convert streamed response to regular response
-    final response = await http.Response.fromStream(streamedResponse);
-  print(jsonDecode(response.body));
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body); // Assuming server sends JSON
-      print(data);
+      if (response.statusCode == 200) {
+        _addStep("✅ Data sent successfully!");
+      } else {
+        _addStep("❌ Failed to send data: ${response.body}");
+        setState(() {
+          _appBarTitle = "Request Failed";
+        });
+      }
+    } catch (e) {
+      _addStep("❌ Error sending data: $e");
       setState(() {
-        _statusMessage = "✅ Uploaded: ${data['message'] ?? 'Success!'}";
-       // Extract image_url
-        
-        // You can also use: data['image_url'] or any other field if available
-      });
-      final imageUrl = data['imageUrl']; // Extract image_url
-      final imageClassification = data['predictionClassification']; // Extract image_classification
-      print(imageUrl);
-      print(imageClassification);
-       setState(() {
-        _statusMessage = "✅ Image uploaded!";
-      });
-            await _sendDataToServer(imageUrl, imageClassification); // Send data to server
-
-    } else {
-      setState(() {
-        _statusMessage =
-            "❌ Failed: ${response.statusCode} - ${response.reasonPhrase}\n${response.body}";
+        _appBarTitle = "Request Failed";
       });
     }
-  } catch (e) {
-    setState(() {
-      _statusMessage = "❌ Error uploading image: $e";
-    });
-  } finally {
-    setState(() {
-      _isLoading = false;
-    });
   }
-}
 
+  Future<String> _getDeviceId() async {
+    final deviceInfo = DeviceInfoPlugin();
+
+    if (Platform.isAndroid) {
+      final androidInfo = await deviceInfo.androidInfo;
+      return androidInfo.id;
+    } else if (Platform.isIOS) {
+      final iosInfo = await deviceInfo.iosInfo;
+      return iosInfo.identifierForVendor ?? "unknown_ios";
+    }
+    return "unknown_device";
+  }
+
+  Future<void> _uploadImage(File imageFile) async {
+    try {
+      final url = Uri.parse('https://sos-backend-uj48.onrender.com/upload-file');
+      final request = http.MultipartRequest('POST', url);
+
+      request.files.add(await http.MultipartFile.fromPath(
+        'image',
+        imageFile.path,
+      ));
+      request.fields['requestType'] = widget.type;
+
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final imageUrl = data['imageUrl'];
+        final imageClass=data['predictionClassification'];
+        print(data);
+        _addStep("✅ Image uploaded successfully!");
+        await _sendDataToServer(imageUrl,imageClass);
+      } else {
+        _addStep(
+            "❌ Failed to upload image: ${response.statusCode} - ${response.reasonPhrase}");
+        setState(() {
+          _appBarTitle = "Request Failed";
+        });
+      }
+    } catch (e) {
+      _addStep("❌ Error uploading image: $e");
+      setState(() {
+        _appBarTitle = "Request Failed";
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Processing...")),
-      body: Center(
-        child: _isLoading
-            ? const CircularProgressIndicator()
-            : Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    _statusMessage,
-                    style: const TextStyle(fontSize: 24),
-                  ),
-                  const SizedBox(height: 20),
-                  ElevatedButton(
+      appBar: AppBar(
+        title: Text(_appBarTitle),
+        centerTitle: true,
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "Processing Steps:",
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: _steps.length,
+                  itemBuilder: (context, index) {
+                    return ListTile(
+                      leading: Icon(
+                        _steps[index].startsWith("✅")
+                            ? Icons.check_circle
+                            : _steps[index].startsWith("❌")
+                                ? Icons.error
+                                : Icons.info,
+                        color: _steps[index].startsWith("✅")
+                            ? Colors.green
+                            : _steps[index].startsWith("❌")
+                                ? Colors.red
+                                : Colors.blue,
+                      ),
+                      title: Text(
+                        _steps[index],
+                        style: const TextStyle(fontSize: 16),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              if (_isLoading)
+                const Center(
+                  child: CircularProgressIndicator(),
+                )
+              else
+                Center(
+                  child: ElevatedButton(
                     onPressed: () {
                       Navigator.pop(context);
                     },
-                    child: const Text("Back"),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 40, vertical: 12),
+                      backgroundColor: Colors.blue,
+                    ),
+                    child: const Text(
+                      "Back",
+                      style: TextStyle(fontSize: 16),
+                    ),
                   ),
-                ],
-              ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
 }
-
-
